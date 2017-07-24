@@ -1,13 +1,13 @@
 -module(zset).
 
--record(zset, {dict :: dict:dict(),
+-record(zset, {map :: #{},
                tree :: gb_trees:tree()}).
 
 -export_type([zset/2, result/2, iterator/2, next/2]).
 
 -type result(K, V) :: {K, integer(), V}.
 
--opaque zset(K, V) :: #zset{dict::dict:dict(K, integer()),
+-opaque zset(K, V) :: #zset{map::#{K => integer()},
                             tree::gb_trees:tree({integer(), K}, V)}.
 
 -opaque iterator(K, V) :: gb_trees:iter({integer(), K}, V).
@@ -21,45 +21,47 @@
 %% @doc Create a new empty zset.
 -spec new() -> #zset{}.
 new() ->
-    #zset{dict = dict:new(), tree = gb_trees:empty()}.
+    #zset{map = #{}, tree = gb_trees:empty()}.
 
 %% @doc Enter the `Member' with the `Value', rated by `Score' into the `ZSet'.
 -spec enter(Member :: K, integer(), Value :: V, zset(K, V)) -> zset(K, V).
-enter(Member, Score, Value, ZSet = #zset{dict=Dict,
+enter(Member, Score, Value, ZSet = #zset{map=Map,
                                          tree=Tree}) ->
-    case dict:find(Member, ZSet#zset.dict) of
+    case maps:find(Member, Map) of
         error ->
-            Dict1 = dict:store(Member, Score, Dict),
+            Map1 = maps:put(Member, Score, Map),
             Tree1 = gb_trees:enter({Score, {v, Member}}, Value, Tree),
-            ZSet#zset{dict=Dict1, tree =Tree1};
+            ZSet#zset{map=Map1, tree =Tree1};
         {ok, PrevScore} ->
-            Dict1 = dict:store(Member, Score, Dict),
+            Map1 = maps:put(Member, Score, Map),
             Tree1 = gb_trees:delete({PrevScore, {v, Member}}, Tree),
             Tree2 = gb_trees:enter({Score, {v, Member}}, Value, Tree1),
-            ZSet#zset{dict=Dict1, tree=Tree2}
+            ZSet#zset{map=Map1, tree=Tree2}
     end.
 
 %% @doc Delete the `Member' from the `ZSet'.
 -spec delete(Member :: K, zset(K, term())) -> zset(K, term()).
-delete(Member, ZSet=#zset{dict=Dict, tree=Tree}) ->
-    case dict:find(Member, ZSet#zset.dict) of
-        error -> ZSet;
+delete(Member, ZSet=#zset{map=Map, tree=Tree}) ->
+    case maps:find(Member, Map) of
+        error ->
+            ZSet;
         {ok, Score} ->
-            Dict1 = dict:erase(Member, Dict),
+            Map1 = maps:remove(Member, Map),
             Tree1 = gb_trees:delete_any({Score, {v, Member}}, Tree),
-            ZSet#zset{dict=Dict1, tree=Tree1}
+            ZSet#zset{map=Map1, tree=Tree1}
     end.
 
 %% @doc Get the size of the `ZSet'.
 -spec size(zset(term(), term())) -> non_neg_integer().
 size(ZSet) ->
-    dict:size(ZSet#zset.dict).
+    maps:size(ZSet#zset.map).
 
 %% @doc Find a `Member' in the `ZSet'.
 -spec find(Member :: K, zset(K, V)) -> error | result(K, V).
-find(Member, ZSet) ->
-    case dict:find(Member, ZSet#zset.dict) of
-        error -> error;
+find(Member, ZSet = #zset{map=Map}) ->
+    case maps:find(Member, Map) of
+        error ->
+            error;
         {ok, Score} ->
             Value = gb_trees:get({Score, {v, Member}}, ZSet#zset.tree),
             {Member, Score, Value}
@@ -109,9 +111,10 @@ top(Score, Count, ZSet) ->
 
 %% @doc Get `Count' values from the `ZSet' starting from the `Member'.
 -spec page(K, non_neg_integer(), zset(K, V)) -> [result(K, V)].
-page(Member, Count, ZSet) ->
-    case dict:find(Member, ZSet#zset.dict) of
-        error -> [];
+page(Member, Count, ZSet=#zset{map=Map}) ->
+    case maps:find(Member, Map) of
+        error ->
+            [];
         {ok, Score} ->
             I = iterator({Score, {v, Member}}, ZSet),
             lists:reverse(do_top(Count, next(I), []))
